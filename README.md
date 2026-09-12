@@ -2,27 +2,18 @@
 
 A curated link resource for students: five topic pages (Heat Wave, Energy Transition, Hope, Architecture, Events), each a chronological list of links. Working name, not final.
 
-Static site, no backend, no database. All content lives in [`data/articles.json`](data/articles.json).
+Static site, no database. All content lives in [`data/articles.json`](data/articles.json). One small serverless function ([`netlify/functions/metadata.mjs`](netlify/functions/metadata.mjs)) reads a pasted page's title/author/date server-side — a browser can't read another site's HTML directly (CORS), so this runs on Netlify instead. No accounts, no config; Netlify picks it up automatically from `netlify.toml`.
 
 ## Adding a link
 
-1. Open the homepage (`index.html`) — the "Add a link" box is at the top.
-2. Click **Load current data/articles.json** to pull in what's already published.
-3. Paste the URL, fill in title, author, date, and pick a category from the dropdown, then **Add to list**.
-4. Repeat for as many links as you like.
-5. Click **Download articles.json**.
-6. Replace `data/articles.json` in this repo with the downloaded file.
-7. Commit and push — Netlify redeploys automatically.
+1. Open the homepage — paste a URL, pick a category, click **Add to list**.
+2. The site fetches that page, pulls out its title/author/date, and downloads an updated `articles.json` (merged with what's already published).
+3. Replace `data/articles.json` in this repo with the downloaded file.
+4. Commit and push — Netlify redeploys automatically.
 
-This form doesn't write anywhere on its own — it just helps you build the JSON file locally. If "Load current data/articles.json" fails (this can happen when opening the file directly via `file://` instead of a server), paste the current contents of `data/articles.json` into the output box manually and edit from there.
+If a page's metadata can't be read (no standard title/author tags, or the fetch fails), the entry still gets added using the domain name and today's date — the status message says so, and you can hand-edit the downloaded JSON to fix it before pushing.
 
-To test locally with the fetch working correctly, serve the folder instead of opening the file directly, e.g.:
-
-```bash
-python3 -m http.server 8000
-```
-
-then visit `http://localhost:8000`.
+The metadata function only runs on Netlify (it needs a live server, not `file://` or a plain static server), so title/author/date lookup won't work when testing `index.html` locally with e.g. `python3 -m http.server`. The category pages and everything else still work fine locally, reading straight from `data/articles.json`.
 
 ## Data format
 

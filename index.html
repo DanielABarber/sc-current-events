@@ -20,22 +20,10 @@
     <section class="add-link">
       <span class="eyebrow">Add a link</span>
       <form id="addForm">
-        <div>
-          <label for="url">URL</label>
-          <input id="url" type="url" placeholder="https://..." required>
-        </div>
-        <div>
-          <label for="title">Title</label>
-          <input id="title" type="text" required>
-        </div>
         <div class="row">
           <div>
-            <label for="author">Author</label>
-            <input id="author" type="text" placeholder="e.g. Jane Smith">
-          </div>
-          <div>
-            <label for="date">Date</label>
-            <input id="date" type="date" required>
+            <label for="url">URL</label>
+            <input id="url" type="url" placeholder="https://..." required>
           </div>
           <div>
             <label for="category">Category</label>
@@ -44,7 +32,7 @@
             </select>
           </div>
         </div>
-        <button type="submit">Add to list</button>
+        <button type="submit" id="submitBtn">Add to list</button>
       </form>
       <div id="status" class="status"></div>
     </section>
@@ -74,45 +62,74 @@
       });
     }
 
-    document.getElementById('date').valueAsDate = new Date();
+    function todayIso() {
+      return new Date().toISOString().slice(0, 10);
+    }
 
     document.getElementById('addForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const statusEl = document.getElementById('status');
+      const submitBtn = document.getElementById('submitBtn');
+      const urlInput = document.getElementById('url');
+      const categorySelect = document.getElementById('category');
+      const rawUrl = urlInput.value.trim();
+
+      submitBtn.disabled = true;
+      statusEl.className = 'status';
+      statusEl.textContent = 'Reading the link…';
+
+      let meta = { title: null, author: null, date: null };
+      let readFailed = false;
+      try {
+        const res = await fetch('/.netlify/functions/metadata?url=' + encodeURIComponent(rawUrl));
+        const data = await res.json();
+        if (res.ok) {
+          meta = data;
+        } else {
+          readFailed = true;
+        }
+      } catch (err) {
+        readFailed = true;
+      }
+
       const entry = {
-        id: slugId(document.getElementById('date').value),
-        title: document.getElementById('title').value.trim(),
-        url: document.getElementById('url').value.trim(),
-        author: document.getElementById('author').value.trim(),
-        date: document.getElementById('date').value,
-        category: document.getElementById('category').value,
+        id: slugId(meta.date || todayIso()),
+        title: meta.title || new URL(rawUrl).hostname.replace(/^www\./, ''),
+        url: rawUrl,
+        author: meta.author || '',
+        date: meta.date || todayIso(),
+        category: categorySelect.value,
       };
 
       let existing = [];
+      let loadFailed = false;
       try {
         existing = await loadArticles();
       } catch (err) {
-        statusEl.textContent = 'Could not load the current data/articles.json (this can happen when opening the file directly instead of via a server) — downloading just this entry instead.';
-        statusEl.className = 'status err';
+        loadFailed = true;
       }
 
       const updated = [...existing, entry];
       const blob = new Blob([JSON.stringify(updated, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
+      a.href = blobUrl;
       a.download = 'articles.json';
       a.click();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(blobUrl);
 
-      if (statusEl.className !== 'status err') {
-        statusEl.textContent = 'Downloaded articles.json — replace data/articles.json in the repo with it, then commit and push.';
-        statusEl.className = 'status ok';
-      }
+      const pieces = [`Added "${entry.title}"`];
+      if (entry.author) pieces.push(`by ${entry.author}`);
+      pieces.push(`(${entry.date})`);
+      let message = pieces.join(' ') + '. Downloaded articles.json — replace data/articles.json in the repo, then commit and push.';
+      if (readFailed) message = `Couldn't read that page automatically, so this was added using the domain name and today's date — edit the downloaded file if you'd like to fix it. ${message}`;
+      if (loadFailed) message += ' (Could not load the existing data/articles.json automatically — this download only has the new entry, so merge it in by hand.)';
+      statusEl.textContent = message;
+      statusEl.className = readFailed || loadFailed ? 'status err' : 'status ok';
 
+      submitBtn.disabled = false;
       e.target.reset();
-      document.getElementById('date').valueAsDate = new Date();
-      document.getElementById('url').focus();
+      urlInput.focus();
     });
 
     document.getElementById('year').textContent = new Date().getFullYear();
