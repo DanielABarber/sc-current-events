@@ -13,11 +13,9 @@
 <body>
 
   <div class="wrap">
-    <header class="site-head">
-      <span class="eyebrow">SC.Current.Events</span>
-      <h1>A student resource, sorted by topic</h1>
-      <p>News, papers, and other reading, organized into five running lists. Pick a topic below, or add a link with the form here.</p>
-    </header>
+    <h1 class="site-title">SC.Current.Events</h1>
+
+    <nav class="category-grid" id="categoryGrid" aria-label="Browse by category"></nav>
 
     <section class="add-link">
       <span class="eyebrow">Add a link</span>
@@ -48,29 +46,14 @@
         </div>
         <button type="submit">Add to list</button>
       </form>
-      <div id="loadStatus" class="status"></div>
-
-      <div class="pending">
-        <div class="pending-head">Pending entries (<span id="count">0</span>)</div>
-        <ul id="pending"></ul>
-        <div class="actions">
-          <button type="button" class="secondary" id="loadBtn">Load current data/articles.json</button>
-          <button type="button" id="downloadBtn">Download articles.json</button>
-        </div>
-        <p style="font-size: 0.8rem; color: var(--ink-soft); margin-top: 0.5rem;">After downloading, replace <code>data/articles.json</code> in the repo with the downloaded file, then commit and push to publish.</p>
-        <textarea id="output" readonly></textarea>
-      </div>
+      <div id="status" class="status"></div>
     </section>
-
-    <nav class="category-grid" id="categoryGrid" aria-label="Browse by category"></nav>
   </div>
 
   <footer>&copy; <span id="year"></span> SC.Current.Events. Built as a static site.</footer>
 
   <script src="js/site.js"></script>
   <script>
-    let articles = [];
-
     function slugId(date) {
       return (date || '') + '-' + Math.random().toString(36).slice(2, 8);
     }
@@ -91,78 +74,50 @@
       });
     }
 
-    function renderPending() {
-      const list = document.getElementById('pending');
-      document.getElementById('count').textContent = articles.length;
-      if (articles.length === 0) {
-        list.innerHTML = '<li style="color: var(--ink-soft); font-style: italic;">Nothing yet.</li>';
-      } else {
-        const sorted = [...articles].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-        list.innerHTML = sorted.map(a => {
-          const cat = CATEGORIES.find(c => c.slug === a.category);
-          return `
-            <li>
-              <span>${escapeHtml(a.date)} &mdash; ${escapeHtml(a.title)} <em>(${escapeHtml(cat ? cat.label : a.category)})</em></span>
-              <button data-id="${escapeAttr(a.id)}">remove</button>
-            </li>
-          `;
-        }).join('');
-        list.querySelectorAll('button[data-id]').forEach(btn => {
-          btn.addEventListener('click', () => {
-            articles = articles.filter(a => a.id !== btn.dataset.id);
-            renderPending();
-          });
-        });
-      }
-      document.getElementById('output').value = JSON.stringify(articles, null, 2);
-    }
-
     document.getElementById('date').valueAsDate = new Date();
 
-    document.getElementById('addForm').addEventListener('submit', (e) => {
+    document.getElementById('addForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const url = document.getElementById('url').value.trim();
-      const title = document.getElementById('title').value.trim();
-      const author = document.getElementById('author').value.trim();
-      const date = document.getElementById('date').value;
-      const category = document.getElementById('category').value;
+      const statusEl = document.getElementById('status');
+      const entry = {
+        id: slugId(document.getElementById('date').value),
+        title: document.getElementById('title').value.trim(),
+        url: document.getElementById('url').value.trim(),
+        author: document.getElementById('author').value.trim(),
+        date: document.getElementById('date').value,
+        category: document.getElementById('category').value,
+      };
 
-      articles.push({ id: slugId(date), title, url, author, date, category });
-      renderPending();
-      e.target.reset();
-      document.getElementById('date').valueAsDate = new Date();
-      document.getElementById('url').focus();
-    });
-
-    document.getElementById('loadBtn').addEventListener('click', async () => {
-      const statusEl = document.getElementById('loadStatus');
+      let existing = [];
       try {
-        const existing = await loadArticles();
-        const existingIds = new Set(articles.map(a => a.id));
-        existing.forEach(a => { if (!existingIds.has(a.id)) articles.push(a); });
-        renderPending();
-        statusEl.textContent = `Loaded ${existing.length} existing entries.`;
-        statusEl.className = 'status ok';
+        existing = await loadArticles();
       } catch (err) {
-        statusEl.textContent = 'Could not load data/articles.json automatically (this can happen when opening the file directly instead of via a server). Paste its contents into the box below and edit there, or just add new links and merge manually.';
+        statusEl.textContent = 'Could not load the current data/articles.json (this can happen when opening the file directly instead of via a server) — downloading just this entry instead.';
         statusEl.className = 'status err';
       }
-    });
 
-    document.getElementById('downloadBtn').addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify(articles, null, 2)], { type: 'application/json' });
+      const updated = [...existing, entry];
+      const blob = new Blob([JSON.stringify(updated, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = 'articles.json';
       a.click();
       URL.revokeObjectURL(url);
+
+      if (statusEl.className !== 'status err') {
+        statusEl.textContent = 'Downloaded articles.json — replace data/articles.json in the repo with it, then commit and push.';
+        statusEl.className = 'status ok';
+      }
+
+      e.target.reset();
+      document.getElementById('date').valueAsDate = new Date();
+      document.getElementById('url').focus();
     });
 
     document.getElementById('year').textContent = new Date().getFullYear();
     renderCategoryButtons();
     renderCategoryOptions();
-    renderPending();
   </script>
 
 </body>
