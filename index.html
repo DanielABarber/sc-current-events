@@ -42,10 +42,6 @@
 
   <script src="js/site.js"></script>
   <script>
-    function slugId(date) {
-      return (date || '') + '-' + Math.random().toString(36).slice(2, 8);
-    }
-
     function renderCategoryButtons() {
       document.getElementById('categoryGrid').innerHTML = CATEGORIES.map(c => `
         <a class="category-btn" href="${c.slug}.html">${escapeHtml(c.label)}</a>
@@ -62,10 +58,6 @@
       });
     }
 
-    function todayIso() {
-      return new Date().toISOString().slice(0, 10);
-    }
-
     document.getElementById('addForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const statusEl = document.getElementById('status');
@@ -73,62 +65,40 @@
       const urlInput = document.getElementById('url');
       const categorySelect = document.getElementById('category');
       const rawUrl = urlInput.value.trim();
+      const category = categorySelect.value;
 
       submitBtn.disabled = true;
       statusEl.className = 'status';
       statusEl.textContent = 'Reading the link…';
 
-      let meta = { title: null, author: null, date: null };
-      let readFailed = false;
       try {
-        const res = await fetch('/.netlify/functions/metadata?url=' + encodeURIComponent(rawUrl));
+        const res = await fetch('/.netlify/functions/articles', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url: rawUrl, category }),
+        });
         const data = await res.json();
-        if (res.ok) {
-          meta = data;
+
+        if (!res.ok) {
+          statusEl.textContent = data.error || 'Could not add that link.';
+          statusEl.className = 'status err';
         } else {
-          readFailed = true;
+          const { entry, readFailed } = data;
+          const pieces = [`Added "${entry.title}"`];
+          if (entry.author) pieces.push(`by ${entry.author}`);
+          pieces.push(`(${entry.date}) to ${CATEGORIES.find(c => c.slug === entry.category)?.label || entry.category}.`);
+          let message = pieces.join(' ');
+          if (readFailed) message = `Couldn't read that page automatically, so this was added using the domain name and today's date. ${message}`;
+          statusEl.textContent = message;
+          statusEl.className = 'status ok';
+          e.target.reset();
         }
       } catch (err) {
-        readFailed = true;
+        statusEl.textContent = 'Could not reach the server — check your connection and try again.';
+        statusEl.className = 'status err';
       }
-
-      const entry = {
-        id: slugId(meta.date || todayIso()),
-        title: meta.title || new URL(rawUrl).hostname.replace(/^www\./, ''),
-        url: rawUrl,
-        author: meta.author || '',
-        date: meta.date || todayIso(),
-        category: categorySelect.value,
-      };
-
-      let existing = [];
-      let loadFailed = false;
-      try {
-        existing = await loadArticles();
-      } catch (err) {
-        loadFailed = true;
-      }
-
-      const updated = [...existing, entry];
-      const blob = new Blob([JSON.stringify(updated, null, 2)], { type: 'application/json' });
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = 'articles.json';
-      a.click();
-      URL.revokeObjectURL(blobUrl);
-
-      const pieces = [`Added "${entry.title}"`];
-      if (entry.author) pieces.push(`by ${entry.author}`);
-      pieces.push(`(${entry.date})`);
-      let message = pieces.join(' ') + '. Downloaded articles.json — replace data/articles.json in the repo, then commit and push.';
-      if (readFailed) message = `Couldn't read that page automatically, so this was added using the domain name and today's date — edit the downloaded file if you'd like to fix it. ${message}`;
-      if (loadFailed) message += ' (Could not load the existing data/articles.json automatically — this download only has the new entry, so merge it in by hand.)';
-      statusEl.textContent = message;
-      statusEl.className = readFailed || loadFailed ? 'status err' : 'status ok';
 
       submitBtn.disabled = false;
-      e.target.reset();
       urlInput.focus();
     });
 

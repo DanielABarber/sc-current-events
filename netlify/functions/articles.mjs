@@ -1,33 +1,75 @@
-// Fetches a page server-side and pulls out title/author/date from its
-// <head> metadata. Runs on Netlify's servers rather than in the browser
-// because cross-origin pages don't allow client-side JS to read their HTML.
+import { getStore } from '@netlify/blobs';
+
+// Keep in sync with CATEGORIES in js/site.js.
+const CATEGORY_SLUGS = ['heat-wave', 'energy-transition', 'hope', 'architecture', 'events'];
+
+const STORE_NAME = 'sc-current-events';
+const KEY = 'articles';
+
 const MAX_BYTES = 300_000;
 const FETCH_TIMEOUT_MS = 8000;
-
 const BLOCKED_HOSTNAME = /^(localhost|127\.|0\.0\.0\.0|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|\[?::1\]?)/i;
 
 export default async (req) => {
-  const { searchParams } = new URL(req.url);
-  const target = searchParams.get('url');
+  const store = getStore(STORE_NAME);
 
-  if (!target) {
-    return json({ error: 'Missing url parameter' }, 400);
+  if (req.method === 'GET') {
+    return json(await readArticles(store), 200);
   }
 
-  let parsed;
-  try {
-    parsed = new URL(target);
-  } catch {
-    return json({ error: 'Invalid URL' }, 400);
+  if (req.method === 'POST') {
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const rawUrl = (body.url || '').trim();
+    const category = body.category;
+    if (!rawUrl || !category) return json({ error: 'url and category are required' }, 400);
+    if (!CATEGORY_SLUGS.includes(category)) return json({ error: 'Unknown category' }, 400);
+
+    let parsed;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return json({ error: 'Invalid URL' }, 400);
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) return json({ error: 'Only http/https URLs are allowed' }, 400);
+    if (BLOCKED_HOSTNAME.test(parsed.hostname)) return json({ error: 'That host is not allowed' }, 400);
+
+    const { meta, readFailed } = await fetchMetadata(parsed);
+    const date = meta.date || todayIso();
+    const entry = {
+      id: date + '-' + Math.random().toString(36).slice(2, 8),
+      title: meta.title || parsed.hostname.replace(/^www\./, ''),
+      url: rawUrl,
+      author: meta.author || '',
+      date,
+      category,
+    };
+
+    const articles = await readArticles(store);
+    articles.push(entry);
+    await store.setJSON(KEY, articles);
+
+    return json({ entry, readFailed }, 201);
   }
 
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    return json({ error: 'Only http/https URLs are allowed' }, 400);
-  }
-  if (BLOCKED_HOSTNAME.test(parsed.hostname)) {
-    return json({ error: 'That host is not allowed' }, 400);
-  }
+  return json({ error: 'Method not allowed' }, 405);
+};
 
+async function readArticles(store) {
+  const data = await store.get(KEY, { type: 'json' });
+  return Array.isArray(data) ? data : [];
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function fetchMetadata(parsed) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -46,17 +88,14 @@ export default async (req) => {
       clearTimeout(timeout);
     }
 
-    if (!res.ok) {
-      return json({ error: `Fetch failed with status ${res.status}` }, 502);
-    }
+    if (!res.ok) return { meta: {}, readFailed: true };
 
     const html = await readBounded(res.body, MAX_BYTES);
-    const meta = extractMetadata(html, parsed.hostname);
-    return json(meta, 200);
+    return { meta: extractMetadata(html, parsed.hostname), readFailed: false };
   } catch (err) {
-    return json({ error: 'Could not fetch that URL' }, 502);
+    return { meta: {}, readFailed: true };
   }
-};
+}
 
 async function readBounded(body, maxBytes) {
   if (!body) return '';
@@ -127,7 +166,6 @@ function extractMetadata(html, hostname) {
     title: title.trim(),
     author: author ? author.trim() : null,
     date,
-    source: hostname.replace(/^www\./, ''),
   };
 }
 

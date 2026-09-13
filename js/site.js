@@ -19,7 +19,7 @@ function escapeHtml(str) {
 function escapeAttr(str) { return escapeHtml(str); }
 
 async function loadArticles() {
-  const res = await fetch('data/articles.json', { cache: 'no-store' });
+  const res = await fetch('/.netlify/functions/articles', { cache: 'no-store' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 }
