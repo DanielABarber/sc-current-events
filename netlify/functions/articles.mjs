@@ -11,7 +11,7 @@ const FETCH_TIMEOUT_MS = 8000;
 const BLOCKED_HOSTNAME = /^(localhost|127\.|0\.0\.0\.0|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|\[?::1\]?)/i;
 
 export default async (req) => {
-  const store = getStore(STORE_NAME);
+  const store = getStore({ name: STORE_NAME, consistency: 'strong' });
 
   if (req.method === 'GET') {
     return json(await readArticles(store), 200);
@@ -55,6 +55,23 @@ export default async (req) => {
     await store.setJSON(KEY, articles);
 
     return json({ entry, readFailed }, 201);
+  }
+
+  if (req.method === 'DELETE') {
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+    if (!body.id) return json({ error: 'id is required' }, 400);
+
+    const articles = await readArticles(store);
+    const next = articles.filter(a => a.id !== body.id);
+    if (next.length === articles.length) return json({ error: 'No entry with that id' }, 404);
+
+    await store.setJSON(KEY, next);
+    return json({ removed: body.id }, 200);
   }
 
   return json({ error: 'Method not allowed' }, 405);
